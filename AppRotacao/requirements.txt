@@ -1,0 +1,7 @@
+matplotlib
+pandas
+streamlit
+seaborn
+xlsxwriter
+openpyxl
+pyodbc
