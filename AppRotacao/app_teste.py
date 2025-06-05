@@ -66,8 +66,7 @@ def carregar_dados_sql():
 
     conn = pyodbc.connect(connection_string)
 
-    query = """-- CTEs para pré-processamento
-WITH Faturamento AS (
+    query = """WITH Faturamento AS (
     SELECT pessoa_id, SUM(valor_total) AS valor_total
     FROM dbo.rel_faturamento
     WHERE data_emissao >= DATEADD(MONTH, -6, GETDATE())
@@ -112,6 +111,18 @@ Orcamentos AS (
         MAX(data_emissao) AS data_ultimo_orcamento
     FROM dbo.rel_crm_orcamentos
     GROUP BY pessoa_cliente_id
+),
+PedidosPorRevenda AS (
+    SELECT 
+        p.revenda_id AS pessoa_id,
+        COUNT(*) AS total_pedidos_revenda,
+        SUM(p.valor_total) AS valor_total_revenda,
+        MAX(p.data_faturamento) AS ultima_data_pedido_revenda
+    FROM dbo.rel_pedidos p
+    WHERE 
+        p.revenda_id IS NOT NULL
+        AND p.data_faturamento >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY p.revenda_id
 )
 
 -- Query principal
@@ -125,9 +136,12 @@ SELECT
     c.grupo_nome AS Grupo_Econômico_Nome,
     v.razao_social AS Nome_Vendedor,
     b.data_ultima_venda AS Data_Ultima_Venda_Individual,
-    COALESCE(f.valor_total, 0) AS Faturamento_6_Meses,
+
+    -- Soma do faturamento direto + indireto (como revenda)
+    COALESCE(f.valor_total, 0) + COALESCE(pr.valor_total_revenda, 0) AS Faturamento_6_Meses,
+
     a.data_cadastro AS Data_Abertura_Conta,
-    COALESCE(p.total_pedidos, 0) AS Total_Pedidos,
+    COALESCE(p.total_pedidos, 0) + COALESCE(pr.total_pedidos_revenda, 0) AS Total_Pedidos,
     COALESCE(g.Data_Ultima_Venda_Grupo_CNPJ, b.data_ultima_venda) AS Data_Ultima_Venda_Grupo_CNPJ,
     COALESCE(fu.total_followups, 0) AS Total_Followups,
     fu.data_ultimo_followup AS Data_Ultimo_Followup,
@@ -139,7 +153,7 @@ SELECT
     b.classificacao_id AS Classificacao_Pessoa,
     a.porte_id AS Porte_Empresa,
 
-    -- Total e último orçamento por cliente
+    -- Orçamentos
     (
         SELECT COUNT(*) 
         FROM dbo.rel_crm_orcamentos d
@@ -163,6 +177,7 @@ FROM
     LEFT JOIN Oportunidades o ON a.id = o.pessoa_id
     LEFT JOIN UltimaVendaPorRaizCNPJ g ON LEFT(b.cpf_cnpj, 8) = g.Raiz_CNPJ
     LEFT JOIN Pedidos p ON a.cliente_id = p.pessoa_id
+    LEFT JOIN PedidosPorRevenda pr ON b.id = pr.pessoa_id
 
 WHERE
     a.tipo_conta = 2
@@ -172,6 +187,8 @@ WHERE
     AND a.classificacao_id <> 1;
 """
     df = pd.read_sql(query, conn)
+    df['Faturamento_6_Meses'] = pd.to_numeric(df['Faturamento_6_Meses'], errors='coerce').fillna(0)
+    df['Faturamento_6_Meses'] = df['Faturamento_6_Meses'].round(2)
     conn.close()
     return df
 
@@ -375,9 +392,13 @@ if arquivo_referencia:
 
     df['Faturamento_6_Meses'] = pd.to_numeric(df['Faturamento_6_Meses'], errors='coerce').fillna(0)
 
-    df['Status_Cliente'] = df['Data_Ultima_Venda_Grupo_CNPJ'].apply(
-        lambda x: 'Nao Compra' if pd.isna(x) or x < data_limite else 'Compra'
+    df['Status_Cliente'] = df.apply(
+        lambda row: 'Compra' if row['Faturamento_6_Meses'] > 0
+        else 'Compra' if pd.notna(row['Data_Ultima_Venda_Grupo_CNPJ']) and row['Data_Ultima_Venda_Grupo_CNPJ'] >= data_limite
+        else 'Nao Compra',
+        axis=1
     )
+
 
     # --- Garantir tipos corretos ---
     df['Data_Ultimo_Contato'] = pd.to_datetime(df['Data_Ultimo_Contato'], errors='coerce')
@@ -431,8 +452,7 @@ if arquivo_referencia:
         (df['Status_Cliente'] == 'Nao Compra') &
         (df['Data_Abertura_Conta'] < data_limite) &
         ((df['Data_Entrou_Carteira'] < data_limite) | (df['Data_Entrou_Carteira'].isnull())) &
-        ((df['Grupo_Econômico_ID'].isnull()) | (df['Grupo_Econômico_ID'] == '')) &
-        (df['Faturamento_6_Meses'] <= 0)
+        ((df['Grupo_Econômico_ID'].isnull()) | (df['Grupo_Econômico_ID'] == ''))
     ]
 
     if "Helder" in opcao:
@@ -623,6 +643,7 @@ if st.button("📄 Gerar Relatório Completo e por Vendedor"):
 
             ativas = anterior_vend[
                 (
+                    (anterior_vend['Faturamento_6_Meses'] > 0) |
                     (anterior_vend['Data_Ultima_Venda_Grupo_CNPJ'] >= data_limite) |
                     (anterior_vend['Grupo_Econômico_ID'].notnull())
                 ) &
@@ -654,10 +675,13 @@ if st.button("📄 Gerar Relatório Completo e por Vendedor"):
             usados.update(cadastradas_recente['Raiz_CNPJ'])
             blocos.append(montar_bloco(cadastradas_recente, 'Cadastrado Recentemente'))
 
-            retiradas = anterior_vend[
+            # CNPJs que não estão mais com o vendedor atual
+            possiveis_retiradas = anterior_vend[
                 (~anterior_vend['Raiz_CNPJ'].isin(atual_vend['Raiz_CNPJ'])) &
                 (~anterior_vend['Raiz_CNPJ'].isin(usados))
             ]
+            # Filtro extra: garantir que são contas sem faturamento e não migraram para outro vendedor
+            retiradas = possiveis_retiradas[possiveis_retiradas['Faturamento_6_Meses'] <= 0.01]
             usados.update(retiradas['Raiz_CNPJ'])
             blocos.append(montar_bloco(retiradas, 'Retiradas'))
 
@@ -700,5 +724,3 @@ if st.button("📄 Gerar Relatório Completo e por Vendedor"):
             file_name="relatorios_rotacao.zip",
             mime="application/zip"
         )
-
-
