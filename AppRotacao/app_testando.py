@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 
 # ---------- FUNÇÕES DE BANCO DE DADOS ----------
 
-# Nova função para buscar vendedores do banco de dados principal (SQL Server)
+# Função para buscar vendedores do banco de dados principal (SQL Server)
 def get_vendedores_from_sql_server():
     server = st.secrets["DB_SERVER"]
     database = st.secrets["DB_NAME"]
@@ -273,6 +273,7 @@ with st.expander("Clique aqui para expandir"):
 
     with col1:
         st.markdown("### ➕ Cadastrar vendedor")
+        # AQUI O NOME DOS VENDEDORES É PUXADO DA QUERY
         nomes_vendedores_empresa = sorted(get_vendedores_from_sql_server())
 
         # Adiciona opções extras
