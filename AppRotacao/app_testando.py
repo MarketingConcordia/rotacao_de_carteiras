@@ -273,7 +273,6 @@ with st.expander("Clique aqui para expandir"):
 
     with col1:
         st.markdown("### ➕ Cadastrar vendedor")
-        # AQUI O NOME DOS VENDEDORES É PUXADO DA QUERY
         nomes_vendedores_empresa = sorted(get_vendedores_from_sql_server())
 
         # Adiciona opções extras
