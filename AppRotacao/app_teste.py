@@ -83,9 +83,9 @@ Contatos AS (
     GROUP BY pessoa_id
 ),
 Oportunidades AS (
-    SELECT 
-        conta_id AS pessoa_id, 
-        COUNT(*) AS total_oportunidades, 
+    SELECT
+        conta_id AS pessoa_id,
+        COUNT(*) AS total_oportunidades,
         MAX(data_cadastro) AS data_ultima_oportunidade
     FROM dbo.crm_oportunidades
     GROUP BY conta_id
@@ -97,7 +97,7 @@ UltimaVendaPorRaizCNPJ AS (
     GROUP BY LEFT(cpf_cnpj, 8)
 ),
 Pedidos AS (
-    SELECT 
+    SELECT
         pessoa_id,
         COUNT(*) AS total_pedidos
     FROM dbo.rel_faturamento
@@ -105,7 +105,7 @@ Pedidos AS (
     GROUP BY pessoa_id
 ),
 Orcamentos AS (
-    SELECT 
+    SELECT
         pessoa_cliente_id,
         COUNT(*) AS total_orcamentos,
         MAX(data_emissao) AS data_ultimo_orcamento
@@ -113,20 +113,20 @@ Orcamentos AS (
     GROUP BY pessoa_cliente_id
 ),
 PedidosPorRevenda AS (
-    SELECT 
+    SELECT
         p.revenda_id AS pessoa_id,
         COUNT(*) AS total_pedidos_revenda,
         SUM(p.valor_total) AS valor_total_revenda,
         MAX(p.data_faturamento) AS ultima_data_pedido_revenda
     FROM dbo.rel_pedidos p
-    WHERE 
+    WHERE
         p.revenda_id IS NOT NULL
         AND p.data_faturamento >= DATEADD(MONTH, -6, GETDATE())
     GROUP BY p.revenda_id
 )
 
 -- Query principal
-SELECT 
+SELECT
     a.id AS Conta_ID,
     a.tipo_conta,
     b.razao_social AS Razao_Social_Pessoas,
@@ -155,7 +155,7 @@ SELECT
 
     -- Orçamentos
     (
-        SELECT COUNT(*) 
+        SELECT COUNT(*)
         FROM dbo.rel_crm_orcamentos d
         WHERE d.pessoa_cliente_id = b.id
     ) AS Total_Orcamentos,
@@ -204,10 +204,27 @@ with st.expander("Clique aqui para expandir"):
 
     with col1:
         st.markdown("### ➕ Cadastrar vendedor")
-        df_dados_empresa = carregar_dados_sql()
-        nomes_vendedores_empresa = sorted(df_dados_empresa['Nome_Vendedor'].dropna().unique().tolist())
+        
+        # Conexão e query para buscar os nomes dos vendedores da tabela dbo.pessoas
+        server = st.secrets["DB_SERVER"]
+        database = st.secrets["DB_NAME"]
+        username = st.secrets["DB_USER"]
+        password = st.secrets["DB_PASSWORD"]
+        connection_string = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={server};DATABASE={database};UID={username};PWD={password}"
+        )
+        conn_vendedores = pyodbc.connect(connection_string)
+        query_vendedores = """
+        SELECT razao_social
+        FROM dbo.pessoas
+        WHERE vendedor = 1 AND ativo = 1
+        """
+        df_nomes_vendedores = pd.read_sql(query_vendedores, conn_vendedores)
+        conn_vendedores.close()
 
-        # Adiciona opções extras
+        nomes_vendedores_empresa = sorted(df_nomes_vendedores['razao_social'].dropna().unique().tolist())
+        
         opcoes = [""] + nomes_vendedores_empresa + ["Outro (digitar manualmente)"]
 
         nome = st.selectbox(
@@ -353,8 +370,8 @@ if arquivo_referencia:
     # --- Carregar data de rotação por conta_id ---
     conn = sqlite3.connect('historico_rotacao.db')
     df_rotacao = pd.read_sql_query('''
-        SELECT conta_id, MAX(data_rotacao) as data_ultima_rotacao 
-        FROM historico_rotacao 
+        SELECT conta_id, MAX(data_rotacao) as data_ultima_rotacao
+        FROM historico_rotacao
         GROUP BY conta_id
     ''', conn)
     conn.close()
