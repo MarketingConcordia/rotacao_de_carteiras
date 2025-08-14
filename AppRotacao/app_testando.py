@@ -12,36 +12,6 @@ from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
 
-# ---------- FUNÇÕES DE BANCO DE DADOS ----------
-
-# Função para buscar vendedores do banco de dados principal (SQL Server)
-def get_vendedores_from_sql_server():
-    server = st.secrets["DB_SERVER"]
-    database = st.secrets["DB_NAME"]
-    username = st.secrets["DB_USER"]
-    password = st.secrets["DB_PASSWORD"]
-
-    connection_string = (
-        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-        f"SERVER={server};DATABASE={database};UID={username};PWD={password}"
-    )
-    conn = pyodbc.connect(connection_string)
-
-    query = """
-    SELECT 
-        razao_social 
-    FROM 
-        dbo.pessoas
-    WHERE
-        vendedor = 1
-        AND ativo = 1;
-    """
-    
-    df = pd.read_sql(query, conn)
-    conn.close()
-    
-    return df['razao_social'].tolist()
-
 def connect_db():
     conn = sqlite3.connect("vendedores.db")
     cursor = conn.cursor()
@@ -49,23 +19,10 @@ def connect_db():
         CREATE TABLE IF NOT EXISTS vendedores (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL UNIQUE,
-            tipo TEXT NOT NULL CHECK(tipo IN ('Distribuição', 'Corporativo', 'Outro Tipo'))
+            tipo TEXT NOT NULL CHECK(tipo IN ('Distribuição', 'Corporativo'))
         )
     """)
     conn.commit()
-
-    try:
-        vendedores_do_sql_server = get_vendedores_from_sql_server()
-        
-        for nome_vendedor in vendedores_do_sql_server:
-            # Insere com tipo padrão "Distribuição", mas pode ser alterado na UI
-            tipo_padrao = 'Distribuição' 
-            cursor.execute("INSERT OR IGNORE INTO vendedores (nome, tipo) VALUES (?, ?)", (nome_vendedor, tipo_padrao))
-        
-        conn.commit()
-    except Exception as e:
-        st.error(f"Erro ao carregar vendedores do SQL Server: {e}")
-
     return conn
 
 def carregar_vendedores():
@@ -74,19 +31,19 @@ def carregar_vendedores():
     return df
 
 def criar_tabela_historico():
-    conn = sqlite3.connect('historico_rotacao.db')
-    c = conn.cursor()
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS historico_rotacao (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome_vendedor TEXT,
-        conta_id INTEGER,
-        tipo_rotacao TEXT,
-        data_rotacao TEXT
-    )
-    ''')
-    conn.commit()
-    conn.close()
+        conn = sqlite3.connect('historico_rotacao.db')
+        c = conn.cursor()
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS historico_rotacao (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome_vendedor TEXT,
+            conta_id INTEGER,
+            tipo_rotacao TEXT,
+            data_rotacao TEXT
+        )
+        ''')
+        conn.commit()
+        conn.close()
 
 criar_tabela_historico()
 
@@ -94,7 +51,7 @@ criar_tabela_historico()
 st.set_page_config(page_title="Rotação de Carteiras", layout="wide")
 st.title("🔁 Sistema de Rotação de Carteiras")
 
-# ---------- CONEXÃO COM BANCO DE DADOS PRINCIPAL ----------
+# ---------- CONEXÃO COM BANCO DE DADOS ----------
 @st.cache_data
 def carregar_dados_sql():
     server = st.secrets["DB_SERVER"]
@@ -109,97 +66,67 @@ def carregar_dados_sql():
 
     conn = pyodbc.connect(connection_string)
 
-    query = """
--- Seção de CTEs
-WITH Faturamento AS (
-    SELECT 
-        pessoa_id, 
-        SUM(valor_total) AS valor_total
-    FROM 
-        dbo.rel_faturamento
-    WHERE 
-        data_emissao >= DATEADD(MONTH, -6, GETDATE())
-    GROUP BY 
-        pessoa_id
+    query = """WITH Faturamento AS (
+    SELECT pessoa_id, SUM(valor_total) AS valor_total
+    FROM dbo.rel_faturamento
+    WHERE data_emissao >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY pessoa_id
 ),
 Followups AS (
-    SELECT 
-        pessoa_id, 
-        COUNT(*) AS total_followups, 
-        MAX(data_cadastro) AS data_ultimo_followup
-    FROM 
-        dbo.pessoas_followup_anexos
-    GROUP BY 
-        pessoa_id
+    SELECT pessoa_id, COUNT(*) AS total_followups, MAX(data_cadastro) AS data_ultimo_followup
+    FROM dbo.pessoas_followup_anexos
+    GROUP BY pessoa_id
 ),
 Contatos AS (
-    SELECT 
-        pessoa_id, 
-        COUNT(*) AS total_contatos, 
-        MAX(data_cadastro) AS data_ultimo_contato
-    FROM 
-        dbo.contatos
-    GROUP BY 
-        pessoa_id
+    SELECT pessoa_id, COUNT(*) AS total_contatos, MAX(data_cadastro) AS data_ultimo_contato
+    FROM dbo.contatos
+    GROUP BY pessoa_id
 ),
 Oportunidades AS (
-    SELECT 
-        conta_id AS pessoa_id, 
-        COUNT(*) AS total_oportunidades, 
+    SELECT
+        conta_id AS pessoa_id,
+        COUNT(*) AS total_oportunidades,
         MAX(data_cadastro) AS data_ultima_oportunidade
-    FROM 
-        dbo.crm_oportunidades
-    GROUP BY 
-        conta_id
+    FROM dbo.crm_oportunidades
+    GROUP BY conta_id
 ),
 UltimaVendaPorRaizCNPJ AS (
-    SELECT 
-        LEFT(cpf_cnpj, 8) AS Raiz_CNPJ, 
-        MAX(data_ultima_venda) AS Data_Ultima_Venda_Grupo_CNPJ
-    FROM 
-        dbo.pessoas
-    WHERE 
-        data_ultima_venda IS NOT NULL
-    GROUP BY 
-        LEFT(cpf_cnpj, 8)
+    SELECT LEFT(cpf_cnpj, 8) AS Raiz_CNPJ, MAX(data_ultima_venda) AS Data_Ultima_Venda_Grupo_CNPJ
+    FROM dbo.pessoas
+    WHERE data_ultima_venda IS NOT NULL
+    GROUP BY LEFT(cpf_cnpj, 8)
 ),
 Pedidos AS (
-    SELECT 
+    SELECT
         pessoa_id,
         COUNT(*) AS total_pedidos
-    FROM 
-        dbo.rel_faturamento
-    WHERE 
-        data_emissao >= DATEADD(MONTH, -6, GETDATE())
-    GROUP BY 
-        pessoa_id
+    FROM dbo.rel_faturamento
+    WHERE data_emissao >= DATEADD(MONTH, -6, GETDATE())
+    GROUP BY pessoa_id
 ),
 Orcamentos AS (
-    SELECT 
+    SELECT
         pessoa_cliente_id,
         COUNT(*) AS total_orcamentos,
         MAX(data_emissao) AS data_ultimo_orcamento
-    FROM 
-        dbo.rel_crm_orcamentos
-    GROUP BY 
-        pessoa_cliente_id
+    FROM dbo.rel_crm_orcamentos
+    GROUP BY pessoa_cliente_id
 ),
 PedidosPorRevenda AS (
-    SELECT 
+    SELECT
         p.revenda_id AS pessoa_id,
         COUNT(*) AS total_pedidos_revenda,
         SUM(p.valor_total) AS valor_total_revenda,
         MAX(p.data_faturamento) AS ultima_data_pedido_revenda
-    FROM 
-        dbo.rel_pedidos p
-    WHERE 
+    FROM dbo.rel_pedidos p
+    WHERE
         p.revenda_id IS NOT NULL
         AND p.data_faturamento >= DATEADD(MONTH, -6, GETDATE())
-    GROUP BY 
-        p.revenda_id
+    GROUP BY p.revenda_id
 )
+
 -- Query principal
-SELECT 
+SELECT
     a.id AS Conta_ID,
     a.tipo_conta,
     b.razao_social AS Razao_Social_Pessoas,
@@ -210,6 +137,7 @@ SELECT
     v.razao_social AS Nome_Vendedor,
     b.data_ultima_venda AS Data_Ultima_Venda_Individual,
 
+    -- Soma do faturamento direto + indireto (como revenda)
     COALESCE(f.valor_total, 0) + COALESCE(pr.valor_total_revenda, 0) AS Faturamento_6_Meses,
 
     a.data_cadastro AS Data_Abertura_Conta,
@@ -225,8 +153,9 @@ SELECT
     b.classificacao_id AS Classificacao_Pessoa,
     a.porte_id AS Porte_Empresa,
 
+    -- Orçamentos
     (
-        SELECT COUNT(*) 
+        SELECT COUNT(*)
         FROM dbo.rel_crm_orcamentos d
         WHERE d.pessoa_cliente_id = b.id
     ) AS Total_Orcamentos,
@@ -258,6 +187,8 @@ WHERE
     AND a.classificacao_id <> 1;
 """
     df = pd.read_sql(query, conn)
+    df['Faturamento_6_Meses'] = pd.to_numeric(df['Faturamento_6_Meses'], errors='coerce').fillna(0)
+    df['Faturamento_6_Meses'] = df['Faturamento_6_Meses'].round(2)
     conn.close()
     return df
 
@@ -273,9 +204,27 @@ with st.expander("Clique aqui para expandir"):
 
     with col1:
         st.markdown("### ➕ Cadastrar vendedor")
-        nomes_vendedores_empresa = sorted(get_vendedores_from_sql_server())
+        
+        # Conexão e query para buscar os nomes dos vendedores da tabela dbo.pessoas
+        server = st.secrets["DB_SERVER"]
+        database = st.secrets["DB_NAME"]
+        username = st.secrets["DB_USER"]
+        password = st.secrets["DB_PASSWORD"]
+        connection_string = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={server};DATABASE={database};UID={username};PWD={password}"
+        )
+        conn_vendedores = pyodbc.connect(connection_string)
+        query_vendedores = """
+        SELECT razao_social
+        FROM dbo.pessoas
+        WHERE vendedor = 1 AND ativo = 1
+        """
+        df_nomes_vendedores = pd.read_sql(query_vendedores, conn_vendedores)
+        conn_vendedores.close()
 
-        # Adiciona opções extras
+        nomes_vendedores_empresa = sorted(df_nomes_vendedores['razao_social'].dropna().unique().tolist())
+        
         opcoes = [""] + nomes_vendedores_empresa + ["Outro (digitar manualmente)"]
 
         nome = st.selectbox(
@@ -288,7 +237,7 @@ with st.expander("Clique aqui para expandir"):
         # Se escolher "Outro", mostrar campo manual
         if nome == "Outro (digitar manualmente)":
             nome = st.text_input("Digite o nome manualmente")
-        tipo = st.selectbox("Tipo", ["Distribuição", "Corporativo", "Outro Tipo"])
+        tipo = st.selectbox("Tipo", ["Distribuição", "Corporativo"])
         if st.button("Cadastrar vendedor"):
             if nome.strip() == "":
                 st.warning("Digite um nome válido.")
@@ -305,7 +254,6 @@ with st.expander("Clique aqui para expandir"):
 
         distribuidores = df_vendedores[df_vendedores["tipo"] == "Distribuição"]["nome"].tolist()
         corporativos = df_vendedores[df_vendedores["tipo"] == "Corporativo"]["nome"].tolist()
-        outros_tipos = df_vendedores[df_vendedores["tipo"] == "Outro Tipo"]["nome"].tolist()
 
         def remover_vendedor(nome):
             cursor.execute("DELETE FROM vendedores WHERE nome = ?", (nome,))
@@ -313,6 +261,7 @@ with st.expander("Clique aqui para expandir"):
             st.success(f"Vendedor '{nome}' removido com sucesso.")
             st.rerun()
 
+        # Inicializa a variável de confirmação no estado da sessão, se não existir
         if "confirma_remocao" not in st.session_state:
             st.session_state.confirma_remocao = None
 
@@ -329,10 +278,10 @@ with st.expander("Clique aqui para expandir"):
                     st.warning(f"Tem certeza que deseja remover **{nome}**?")
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        if st.button("✅ Confirmar remoção", key=f"confirmar_dist_{nome}"):
+                        if st.button("✅ Confirmar remoção", key=f"confirmar_{nome}"):
                             remover_vendedor(nome)
                     with col_b:
-                        if st.button("❌ Cancelar", key=f"cancelar_dist_{nome}"):
+                        if st.button("❌ Cancelar", key=f"cancelar_{nome}"):
                             cancelar_remocao()
                 else:
                     col1, col2 = st.columns([8,1])
@@ -350,70 +299,63 @@ with st.expander("Clique aqui para expandir"):
                     st.warning(f"Tem certeza que deseja remover **{nome}**?")
                     col_a, col_b = st.columns(2)
                     with col_a:
-                        if st.button("✅ Confirmar remoção", key=f"confirmar_corp_{nome}"):
+                        if st.button("✅ Confirmar remoção", key=f"confirmar_{nome}"):
                             remover_vendedor(nome)
                     with col_b:
-                        if st.button("❌ Cancelar", key=f"cancelar_corp_{nome}"):
+                        if st.button("❌ Cancelar", key=f"cancelar_{nome}"):
                             cancelar_remocao()
                 else:
                     col1, col2 = st.columns([8,1])
                     with col1:
                         st.write(nome)
                     with col2:
-                        st.button(f"❌", key=f"remover_corp_{nome}", on_click=pedir_confirmacao, args=(nome,))
+                        st.button(f"❌", key=f"remover_dist_{nome}", on_click=pedir_confirmacao, args=(nome,))
         else:
             st.write("_Nenhum vendedor cadastrado._")
-
-        st.markdown("#### Outro Tipo")
-        if outros_tipos:
-            for nome in outros_tipos:
-                if st.session_state.confirma_remocao == nome:
-                    st.warning(f"Tem certeza que deseja remover **{nome}**?")
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        if st.button("✅ Confirmar remoção", key=f"confirmar_outros_{nome}"):
-                            remover_vendedor(nome)
-                    with col_b:
-                        if st.button("❌ Cancelar", key=f"cancelar_outros_{nome}"):
-                            cancelar_remocao()
-                else:
-                    col1, col2 = st.columns([8,1])
-                    with col1:
-                        st.write(nome)
-                    with col2:
-                        st.button(f"❌", key=f"remover_outros_{nome}", on_click=pedir_confirmacao, args=(nome,))
-        else:
-            st.write("_Nenhum vendedor cadastrado._")
-
-conn = connect_db()
-cursor = conn.cursor()
 
 query = "SELECT nome FROM vendedores WHERE tipo = ?"
 cursor.execute(query, ('Distribuição',))
-vendedores_ativos_helder = [row[0] for row in cursor.fetchall()]
+vendedores_ativos_helder = [
+    row[0] for row in cursor.fetchall()
+]
+
+# 'Bryan Casarotto',
+# 'Daniele Schmitz',
+# 'GILBERTO LIMA DE PINHO JUNIOR',
+# 'Laura Vitoria Da Silveira Trindade',
+# 'Leonardo Bianchi',
+# 'Letícia Eduarda Cruz',
+# 'LUCAS VASCONCELOS BATTAGLIA KRAUSE',
+# 'RONALDO DA COSTA BARRIOS',
+# 'Ruan da Silva',
+# 'TALIA LINS RAMOS',
+# 'Willian Luiz Pereira'
 
 query = "SELECT nome FROM vendedores WHERE tipo = ?"
 cursor.execute(query, ('Corporativo',))
-vendedores_ativos_karen = [row[0] for row in cursor.fetchall()]
+vendedores_ativos_karen = [
+    row[0] for row in cursor.fetchall()
+]
 
-query = "SELECT nome FROM vendedores WHERE tipo = ?"
-cursor.execute(query, ('Outro Tipo',))
-vendedores_ativos_outro = [row[0] for row in cursor.fetchall()]
+# 'Amanda Dias do Amaral',
+# 'CRISTIAN RHEINHEIMER',
+# 'Eduardo Dutra de Lima',
+# 'GUSTAVO BALBINOTT VENASSI',
+# 'Guilherme Rafael Hartmann Soares',
+# 'Gustavo Cesar Burnier',
+# 'JOAO PEDRO MOCELIN',
+# 'Joao Gustavo Santian Da Silva',
+# 'Kaylane Victoria Sousa Sa',
+# 'LUCAS SIMOES BERNART',
+# 'MARJANA  KUHN',
+# 'MAURICIO HENRIQUE CESCO',
+# 'MURILO DUARTE DA SILVA',
+# 'Sidinei Da Silva Dias',
+# 'TIAGO PEDROSO DA SILVA'
 
-opcao = st.selectbox(
-    "Escolha o grupo de vendedores:", 
-    ["Distribuição (Helder)", "Corporativo (Karen)", "Outro Tipo"]
-)
-
-if "Helder" in opcao:
-    vendedores_ativos = vendedores_ativos_helder
-    pasta_relatorios = 'Relatorio_Vendedores_Helder'
-elif "Karen" in opcao:
-    vendedores_ativos = vendedores_ativos_karen
-    pasta_relatorios = 'Relatorio_Vendedores_Karen'
-else:
-    vendedores_ativos = vendedores_ativos_outro
-    pasta_relatorios = 'Relatorio_Vendedores_Outro'
+opcao = st.selectbox("Escolha o grupo de vendedores:", ["Distribuição (Helder)", "Corporativo (Karen)"])
+vendedores_ativos = vendedores_ativos_helder if "Helder" in opcao else vendedores_ativos_karen
+pasta_relatorios = 'Relatorio_Vendedores_Helder' if "Helder" in opcao else 'Relatorio_Vendedores_Karen'
 
 st.markdown('------')
 # ---------- LEITURA DA REFERÊNCIA ----------
@@ -428,8 +370,8 @@ if arquivo_referencia:
     # --- Carregar data de rotação por conta_id ---
     conn = sqlite3.connect('historico_rotacao.db')
     df_rotacao = pd.read_sql_query('''
-        SELECT conta_id, MAX(data_rotacao) as data_ultima_rotacao 
-        FROM historico_rotacao 
+        SELECT conta_id, MAX(data_rotacao) as data_ultima_rotacao
+        FROM historico_rotacao
         GROUP BY conta_id
     ''', conn)
     conn.close()
@@ -439,6 +381,7 @@ if arquivo_referencia:
     df_rotacao['conta_id'] = df_rotacao['conta_id'].apply(
     lambda x: int.from_bytes(x, byteorder='little') if isinstance(x, bytes) else int(x)
     )
+
 
     df['Raiz_CNPJ'] = df['Raiz_CNPJ'].astype(str).str.strip().str.zfill(14)
     referencia['Raiz_CNPJ'] = referencia['Raiz_CNPJ'].astype(str).str.strip().str.zfill(14)
@@ -466,9 +409,13 @@ if arquivo_referencia:
 
     df['Faturamento_6_Meses'] = pd.to_numeric(df['Faturamento_6_Meses'], errors='coerce').fillna(0)
 
-    df['Status_Cliente'] = df['Data_Ultima_Venda_Grupo_CNPJ'].apply(
-        lambda x: 'Nao Compra' if pd.isna(x) or x < data_limite else 'Compra'
+    df['Status_Cliente'] = df.apply(
+        lambda row: 'Compra' if row['Faturamento_6_Meses'] > 0
+        else 'Compra' if pd.notna(row['Data_Ultima_Venda_Grupo_CNPJ']) and row['Data_Ultima_Venda_Grupo_CNPJ'] >= data_limite
+        else 'Nao Compra',
+        axis=1
     )
+
 
     # --- Garantir tipos corretos ---
     df['Data_Ultimo_Contato'] = pd.to_datetime(df['Data_Ultimo_Contato'], errors='coerce')
@@ -516,24 +463,20 @@ if arquivo_referencia:
 
     df_historico = df[['Raiz_CNPJ', 'Nome_Vendedor']].dropna().drop_duplicates().reset_index(drop=True)
 
-    df_filtrado = df[df['Nome_Vendedor'].isin(vendedores_ativos)].reset_index(drop=True)
+    df_filtrado = df[df['Nome_Vendedor'].isin(vendedores_ativos_helder + vendedores_ativos_karen)].reset_index(drop=True)
 
     contas_vao_rotacionar = df[
         (df['Status_Cliente'] == 'Nao Compra') &
         (df['Data_Abertura_Conta'] < data_limite) &
         ((df['Data_Entrou_Carteira'] < data_limite) | (df['Data_Entrou_Carteira'].isnull())) &
-        ((df['Grupo_Econômico_ID'].isnull()) | (df['Grupo_Econômico_ID'] == '')) &
-        (df['Faturamento_6_Meses'] == 0)
+        ((df['Grupo_Econômico_ID'].isnull()) | (df['Grupo_Econômico_ID'] == ''))
     ]
 
-    # Lógica de filtragem baseada na opção selecionada
     if "Helder" in opcao:
         contas_filtradas = contas_vao_rotacionar[contas_vao_rotacionar['Classificacao_Conta'].isin([5, 7])]
-    elif "Karen" in opcao:
+    else:
         contas_filtradas = contas_vao_rotacionar[~contas_vao_rotacionar['Classificacao_Conta'].isin([5, 7])]
-    else: # Novo grupo
-        contas_filtradas = contas_vao_rotacionar
-        
+
     def registrar_historico_rotacao(nome_vendedor, conta_id, tipo_rotacao, data_rotacao):
         conn = sqlite3.connect('historico_rotacao.db')
         c = conn.cursor()
@@ -619,6 +562,17 @@ if st.button("🔁 Rodar contas agora"):
     st.write("Contas sem rotação (sem vendedor disponível):")
     st.dataframe(contas_sobras)
 
+# # VERIFICAÇÃO DE HISTORICO
+# st.subheader("📚 Histórico de Rotações Registradas")
+
+# if st.checkbox("🔍 Mostrar histórico de rotações"):
+#     conn = sqlite3.connect('historico_rotacao.db')
+#     df_historico = pd.read_sql_query("SELECT * FROM historico_rotacao ORDER BY data_rotacao DESC", conn)
+#     conn.close()
+#     st.dataframe(df_historico)
+
+
+# Gerar downloads fora do if
 def gerar_excel_download(df):
     from io import BytesIO
     output = BytesIO()
@@ -635,12 +589,26 @@ if "contas_rotacionadas" in st.session_state:
         file_name=f"historico_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
     )
 
+# if "contas_sobras" in st.session_state:
+#     st.download_button(
+#         "📥 Baixar contas sem rotação",
+#         data=gerar_excel_download(st.session_state["contas_sobras"]),
+#         file_name="contas_sobras.xlsx"
+#     )
+
+
+# else:
+#     st.info("Envie o arquivo de referência para continuar.")
+    
 st.markdown("---")
 
 st.subheader("📊 Gerar Relatórios por Vendedor")
+
 st.markdown('👇 Clique no botão abaixo para fazer o download dos relatórios de rotação.')
 
 if st.button("📄 Gerar Relatório Completo e por Vendedor"):
+
+    # Define df_atual com base na existência de rotação
     if "contas_rotacionadas" in st.session_state:
         df_atual = st.session_state["contas_rotacionadas"].copy()
         st.success("✅ Usando contas rotacionadas para o relatório.")
@@ -692,6 +660,7 @@ if st.button("📄 Gerar Relatório Completo e por Vendedor"):
 
             ativas = anterior_vend[
                 (
+                    (anterior_vend['Faturamento_6_Meses'] > 0) |
                     (anterior_vend['Data_Ultima_Venda_Grupo_CNPJ'] >= data_limite) |
                     (anterior_vend['Grupo_Econômico_ID'].notnull())
                 ) &
@@ -723,10 +692,13 @@ if st.button("📄 Gerar Relatório Completo e por Vendedor"):
             usados.update(cadastradas_recente['Raiz_CNPJ'])
             blocos.append(montar_bloco(cadastradas_recente, 'Cadastrado Recentemente'))
 
-            retiradas = anterior_vend[
+            # CNPJs que não estão mais com o vendedor atual
+            possiveis_retiradas = anterior_vend[
                 (~anterior_vend['Raiz_CNPJ'].isin(atual_vend['Raiz_CNPJ'])) &
                 (~anterior_vend['Raiz_CNPJ'].isin(usados))
             ]
+            # Filtro extra: garantir que são contas sem faturamento e não migraram para outro vendedor
+            retiradas = possiveis_retiradas[possiveis_retiradas['Faturamento_6_Meses'] <= 0.01]
             usados.update(retiradas['Raiz_CNPJ'])
             blocos.append(montar_bloco(retiradas, 'Retiradas'))
 
