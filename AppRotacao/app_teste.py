@@ -611,6 +611,7 @@ if st.button("📄 Gerar Relatório Completo e por Vendedor"):
                 bloco = df[[
                     'Nome_Vendedor',
                     'Razao_Social_Pessoas',
+                    'Conta_ID',
                     'Raiz_CNPJ',
                     'Faturamento_6_Meses',
                     'Total_Pedidos',
