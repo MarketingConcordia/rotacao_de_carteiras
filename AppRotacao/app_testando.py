@@ -319,39 +319,11 @@ vendedores_ativos_helder = [
     row[0] for row in cursor.fetchall()
 ]
 
-# 'Bryan Casarotto',
-# 'Daniele Schmitz',
-# 'GILBERTO LIMA DE PINHO JUNIOR',
-# 'Laura Vitoria Da Silveira Trindade',
-# 'Leonardo Bianchi',
-# 'Letícia Eduarda Cruz',
-# 'LUCAS VASCONCELOS BATTAGLIA KRAUSE',
-# 'RONALDO DA COSTA BARRIOS',
-# 'Ruan da Silva',
-# 'TALIA LINS RAMOS',
-# 'Willian Luiz Pereira'
-
 query = "SELECT nome FROM vendedores WHERE tipo = ?"
 cursor.execute(query, ('Corporativo',))
 vendedores_ativos_karen = [
     row[0] for row in cursor.fetchall()
 ]
-
-# 'Amanda Dias do Amaral',
-# 'CRISTIAN RHEINHEIMER',
-# 'Eduardo Dutra de Lima',
-# 'GUSTAVO BALBINOTT VENASSI',
-# 'Guilherme Rafael Hartmann Soares',
-# 'Gustavo Cesar Burnier',
-# 'JOAO PEDRO MOCELIN',
-# 'Joao Gustavo Santian Da Silva',
-# 'Kaylane Victoria Sousa Sa',
-# 'LUCAS SIMOES BERNART',
-# 'MARJANA  KUHN',
-# 'MAURICIO HENRIQUE CESCO',
-# 'MURILO DUARTE DA SILVA',
-# 'Sidinei Da Silva Dias',
-# 'TIAGO PEDROSO DA SILVA'
 
 opcao = st.selectbox("Escolha o grupo de vendedores:", ["Distribuição (Helder)", "Corporativo (Karen)"])
 vendedores_ativos = vendedores_ativos_helder if "Helder" in opcao else vendedores_ativos_karen
@@ -589,16 +561,16 @@ if "contas_rotacionadas" in st.session_state:
         file_name=f"historico_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
     )
 
-# if "contas_sobras" in st.session_state:
-#     st.download_button(
-#         "📥 Baixar contas sem rotação",
-#         data=gerar_excel_download(st.session_state["contas_sobras"]),
-#         file_name="contas_sobras.xlsx"
-#     )
+if "contas_sobras" in st.session_state:
+    st.download_button(
+        "📥 Baixar contas sem rotação",
+        data=gerar_excel_download(st.session_state["contas_sobras"]),
+        file_name="contas_sobras.xlsx"
+    )
 
 
-# else:
-#     st.info("Envie o arquivo de referência para continuar.")
+else:
+    st.info("Envie o arquivo de referência para continuar.")
     
 st.markdown("---")
 
@@ -639,6 +611,7 @@ if st.button("📄 Gerar Relatório Completo e por Vendedor"):
                 bloco = df[[
                     'Nome_Vendedor',
                     'Razao_Social_Pessoas',
+                    'Conta_ID',
                     'Raiz_CNPJ',
                     'Faturamento_6_Meses',
                     'Total_Pedidos',
